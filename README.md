@@ -1,24 +1,27 @@
 # Retail Pipeline Data Cleaning & Exploratory Analytics (Python & Pandas)
 
 ## Executive Summary & Business Context
-Raw operational data in retail systems is frequently fragmented across disparate touchpoints (CRM customer profiles, order fulfillment logs, and payment gateway transactions). In this project, I engineered a Python and Pandas data cleaning and analytics pipeline to unify multi-table retail data, resolve severe data hygiene issues, and surface executive-level revenue and operational insights.
+In multi-channel retail systems, operational data is fragmented across customer relationship management (CRM) software, e-commerce order fulfillment databases, and payment processing gateways. Inconsistent data entry, system synchronization lag, and missing attributes frequently obscure true financial performance.
 
-The analysis answered four core operational questions:
-1. **Customer Revenue Contribution:** Who are our top revenue-generating customers by total lifetime spend?
-2. **Geographic Sales Performance:** How is sales revenue distributed across international markets?
-3. **Sales Momentum & Seasonality:** What are the monthly and annual revenue trajectories?
-4. **Logistics & Fulfillment Health:** What is the average order-to-delivery lead time, and where are data anomaly flags occurring?
+In this project, I built an end-to-end Python and Pandas data cleansing, integration, and exploratory analytics pipeline. By transforming raw, uncleaned transactional extracts into a unified analytical schema, I surfaced core revenue metrics, customer spend behaviors, and fulfillment SLA performance.
+
+---
+
+## DA / BA Core Competencies & Technical Skills
+
+`Python` `Pandas` `NumPy` `Matplotlib` `Exploratory Data Analysis (EDA)` `Data Cleansing & Sanitization` `Primary Key Deduplication` `Categorical Standardization` `Missing Value Imputation` `Relational Joins & Schema Merging` `Time-Series Analysis` `Operational Anomaly Detection` `Business Metrics (AOV, ATV, LTV)`
 
 ---
 
 ## Technical Stack & Repository Architecture
 * **Language:** Python
-* **Core Libraries:** Pandas, NumPy, Matplotlib
+* **Data Processing:** Pandas, NumPy
+* **Data Visualization:** Matplotlib (2×2 Executive Panel)
 * **Execution Environment:** Jupyter Notebook (`sales_pipeline_analysis.ipynb`)
 
 ```
 data-cleaning-analysis-pandas/
-├── README.md                                          # Project documentation & insights
+├── README.md                                          # Project documentation & business insights
 ├── LICENSE                                            # MIT Open Source License
 ├── data/
 │   └── raw/
@@ -26,78 +29,96 @@ data-cleaning-analysis-pandas/
 │       ├── orders.csv                                 # Raw order fulfillment logs
 │       └── transactions.csv                           # Raw payment gateway transactions
 ├── notebooks/
-│   └── sales_pipeline_analysis.ipynb                  # Main Python/Pandas data pipeline
+│   └── sales_pipeline_analysis.ipynb                  # Main Python/Pandas data pipeline notebook
 └── reports/
-    └── figures/                                       # Exported Matplotlib visualizations
+    └── figures/                                       # Saved dashboard visual exports
 ```
 
 ---
 
-## Data Quality Challenges & Cleaning Pipeline
+## Data Cleaning & Engineering Deep-Dive
 
-When auditing the raw files in `data/raw/`, I identified four major data quality barriers:
+### 1. Primary Key Deduplication & Coalescing
+Asynchronous database writes generated duplicate records for customer entities (e.g., `C001`, `C002`, `C010`).
+* **Methodology:** Applied `drop_duplicates(subset=['customer_id'], keep='first')` across entity tables to establish clean primary key constraints.
+* **Custom Aggregation:** Implemented a `first_valid()` custom fallback function over grouped customer records to preserve non-null attributes across redundant rows.
 
-### 1. Primary Key Duplicates & Conflict Resolution
-Multiple records existed for individual customer IDs (e.g., `C001`, `C002`, `C010`) due to asynchronous profile updates.
-* **Resolution:** Applied `groupby('customer_id')` with a customized first-non-null aggregation (`first()`) to consolidate duplicate attributes into a single clean customer record.
-
-### 2. Country Standardizations (String Normalization)
-Country fields contained inconsistent string representations (e.g., `"USA"`, `"usa"`, `"United States"`, `"US"`, `"U.S.A."`, `"UNITED STATES"`).
-* **Resolution:** Built a standardization dictionary mapping all country variations into clean ISO codes (`"USA"`, `"UK"`, `"UAE"`, `"Germany"`, `"Canada"`, `"Mexico"`, `"Japan"`).
-
-### 3. Missing Value Imputation
-Optional contact attributes (`email`, `phone_secondary`, `city`) contained `NaN` values.
-* **Resolution:** Rather than dropping rows and losing sales volume, missing contact fields were safely imputed using explicit fallbacks (`"Unknown Email"`, `"Not Provided"`).
-
-### 4. Shipping Lead-Time & Anomaly Detection
-Shipping durations (`shipping_date - order_date`) contained negative values (e.g., shipping date logged before purchase date), indicating system timestamp unsafety.
-* **Resolution:** Converted date strings using `pd.to_datetime()`, calculated transit days via `.dt.days`, and flagged negative shipping days as operational anomalies without dropping transaction data.
-
----
-
-## Python / Pandas Implementation Highlights
-
-### 1. Geographic Standardization & String Clean-Up
 ```python
-import pandas as pd
+def first_valid(series):
+    """Retrieve first non-null entry within a grouped attribute series."""
+    for val in series:
+        if pd.notna(val):
+            return val
+    return None
 
-# Mapping dictionary for country string normalization
-country_mapping = {
-    'USA': 'USA', 'usa': 'USA', 'United States': 'USA', 'US': 'USA', 
-    'U.S.A.': 'USA', 'UNITED STATES': 'USA',
-    'UK': 'UK', 'United Kingdom': 'UK', 'Great Britain': 'UK', 
-    'united kingdom': 'UK',
-    'UAE': 'UAE', 'United Arab Emirates': 'UAE'
+# Deduplicate customer entities via custom aggregation
+customers_clean = customers.groupby('customer_id', as_index=False).agg(first_valid)
+```
+
+### 2. Categorical String Normalization (Country Attributes)
+Country attributes contained free-text string variations (e.g., `"USA"`, `"usa"`, `"United States"`, `"US"`, `"U.S.A."`, `"UNITED STATES"`).
+* **Methodology:** Constructed a standardization dictionary map (`country_map`) and executed vectorized string replacements (`replace()`) to enforce clean ISO country naming across all records.
+
+```python
+country_map = {
+    'United States': 'USA', 'usa': 'USA', 'US': 'USA', 'U.S.A.': 'USA', 'UNITED STATES': 'USA',
+    'United Kingdom': 'UK', 'United kingdom': 'UK', 'united kingdom': 'UK', 'Great Britain': 'UK',
+    'United Arab Emirates': 'UAE'
 }
 
-# Standardizing country attribute
-customers['country'] = customers['country'].map(country_mapping).fillna(customers['country'])
+# Apply dictionary mapping for categorical standardization
+customers_cleaned['country'] = customers_cleaned['country'].replace(country_map)
 ```
 
-### 2. Temporal Calculation & Anomaly Flagging
+### 3. Non-Destructive Missing Value Imputation
+Optional contact attributes (`email`, `phone_primary`, `phone_secondary`, `city`) contained missing (`NaN`) values.
+* **Methodology:** Rather than dropping rows (which would corrupt downstream order totals), missing fields were safely imputed using explicit string fallbacks (`fillna('Not Provided')` and `fillna('Unknown')`), maintaining row count integrity.
+
 ```python
-# Convert text strings to datetime objects
-orders['order_date'] = pd.to_datetime(orders['order_date'])
-orders['shipping_date'] = pd.to_datetime(orders['shipping_date'])
+# Non-destructive imputation for missing attributes
+customers_cleaned['email'] = customers_cleaned['email'].fillna('Not Provided')
+customers_cleaned['phone_primary'] = customers_cleaned['phone_primary'].fillna('Not Provided')
+customers_cleaned['city'] = customers_cleaned['city'].fillna('Unknown')
+```
 
-# Calculate shipping duration in days
-orders['shipping_days'] = (orders['shipping_date'] - orders['order_date']).dt.days
+### 4. Relational Data Merging & Schema Alignment
+Combined 3 cleaned entity tables (`customers`, `orders`, `transactions`) into a unified master dataset.
+* **Methodology:** Performed sequential left joins (`pd.merge(..., on='customer_id', how='left')`) and resolved column name collisions (renaming `purchase_amount` in transactions to `transaction_amount`).
 
-# Flag negative delivery days as operational anomalies
-orders['anomaly_flag'] = orders['shipping_days'].apply(lambda x: 'Negative Transit Anomaly' if x < 0 else 'Normal')
+```python
+# Resolve column collision prior to merge
+transactions_cleaned = transactions_cleaned.rename(columns={'purchase_amount': 'transaction_amount'})
+
+# Left join customer master with order logs and transaction details
+customers_orders = pd.merge(customers_cleaned, orders_cleaned, on='customer_id', how='left')
+full_data = pd.merge(customers_orders, transactions_cleaned, on='customer_id', how='left')
+```
+
+### 5. Temporal Lead-Time Calculation & Anomaly Detection
+Calculated fulfillment lead-times (`shipping_date - order_date`) to audit logistics SLAs.
+* **Methodology:** Converted string date fields to `datetime64[ns]` objects, calculated transit duration via `.dt.days`, and isolated negative transit values (shipping date preceding order date) into an explicit `anomaly_flag` column for IT database audit without dropping financial data.
+
+```python
+# Datetime conversion and lead-time calculation
+full_data['ship_days'] = (full_data['ship_date'] - full_data['order_date']).dt.days
+
+# Isolate valid transit durations and flag negative anomalies
+valid_shipments = full_data[full_data['ship_days'] >= 0]
+bad_shipments = full_data[full_data['ship_days'] < 0]
 ```
 
 ---
 
-## Key Executive Insights
+## Business Analytics & Executive Insights
 
-1. **Geographic Revenue Distribution:**
-   * The **United States (USA)** drives the highest overall sales revenue, followed by the **United Kingdom (UK)** and **Canada**.
-2. **Customer Lifetime Spend:**
-   * High-value accounts demonstrate strong repeat purchasing behavior, with top individual spenders contributing disproportionately to gross pipeline revenue.
-3. **Fulfillment Lead-Times:**
-   * Average shipping lead time across normal orders is **~3.2 days**.
-   * Isolated negative transit day anomalies were successfully isolated and flagged for IT database sync remediation.
+| Metric Category | Business Indicator | Value / Finding |
+| :--- | :--- | :--- |
+| **Financial Performance** | Average Order Value (AOV) | **$104.38** per order |
+| **Financial Performance** | Average Transaction Value (ATV) | **$104.38** per transaction |
+| **Geographic Distribution** | Top Revenue Country | **United States (USA)**, followed by **UK** & **Canada** |
+| **Logistics SLA** | Clean Shipping Duration | **3.2 Days** average transit lead-time |
+| **Logistics SLA** | Shipping Speed Range | **0 Days** (fastest) to **7 Days** (slowest) |
+| **Data Quality Audit** | System Anomaly Flags | Isolated negative lead-time records flagged for IT sync review |
 
 ---
 
