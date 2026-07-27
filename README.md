@@ -20,7 +20,7 @@ In this project, I built an end-to-end Python and Pandas data cleansing, integra
 * **Execution Environment:** Jupyter Notebook (`sales_pipeline_analysis.ipynb`)
 
 ```
-data-cleaning-analysis-pandas/
+python-data-quality-engine/
 ├── README.md                                          # Project documentation & business insights
 ├── LICENSE                                            # MIT Open Source License
 ├── data/
